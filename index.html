@@ -1,0 +1,721 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12171a">
+<title>Bin Scanner</title>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<style>
+  :root {
+    --bg: #12171a; --panel: #1c2327; --ink: #eceae5; --muted: #98a2a8; --line: #2c3539;
+    --yes: #2f8f6f; --no: #b0453f; --again: #3b6ea8; --warn: #e0a060;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 16px/1.4 -apple-system, system-ui, "Segoe UI", sans-serif;
+         padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 10px 12px 24px; }
+  .top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .top .bin { font-size: 22px; font-weight: 700; }
+  .top .spacer { flex: 1; }
+  .pill { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--yes); } .dot.bad { background: var(--no); }
+
+  .stage { position: relative; background: #000; border-radius: 14px; overflow: hidden; width: 100%; max-height: 42vh; aspect-ratio: 3 / 4; margin: 0 auto; }
+  .stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .stage.mirror video, .stage.mirror canvas { transform: scaleX(-1); }
+  .stage .placeholder { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--muted); }
+
+  #banner { margin-top: 10px; padding: 14px 16px; border-radius: 14px; background: var(--panel); display: flex; gap: 12px; align-items: center; min-height: 78px; }
+  #banner .icon { width: 16px; height: 16px; border-radius: 50%; background: var(--muted); flex: none; }
+  #banner.listening .icon { background: var(--no); animation: pulse 1s infinite; }
+  #banner.busy .icon { background: var(--warn); animation: pulse .7s infinite; }
+  #banner.ready .icon { background: var(--yes); }
+  #bannerMain { font-size: 26px; font-weight: 700; line-height: 1.15; display: block; }
+  #bannerSub { font-size: 15px; color: var(--muted); display: block; margin-top: 2px; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  .bigbtns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .bigbtns button { height: 84px; font-size: 24px; font-weight: 700; border: 0; border-radius: 16px; color: #fff; }
+  .bigbtns button:disabled { opacity: .28; }
+  #yesBtn { background: var(--yes); } #noBtn { background: var(--no); } #againBtn { background: var(--again); }
+  #startBtn { width: 100%; height: 72px; margin-top: 10px; font-size: 22px; font-weight: 700; border: 0; border-radius: 16px; background: var(--yes); color: #fff; }
+
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .card { background: var(--panel); border-radius: 14px; padding: 12px 14px; margin-top: 12px; }
+  .card h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+  button.small { white-space: nowrap; font: inherit; padding: 9px 14px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--ink); }
+  input[type=text], input[type=password], input[type=url], select {
+    font: inherit; font-size: 16px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 100%; }
+  label { display: block; color: var(--muted); font-size: 14px; margin-top: 12px; }
+  label.check { display: flex; gap: 8px; align-items: center; color: var(--ink); }
+  .stats { display: flex; gap: 20px; color: var(--muted); font-size: 13px; }
+  .stats b { display: block; color: var(--ink); font-size: 18px; }
+  #log { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; }
+  #log li { display: grid; grid-template-columns: 48px 1fr auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+  #log li:first-child { border-top: 0; }
+  #log img { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; background: #000; }
+  #log .name { font-weight: 600; }
+  #log .meta { font-size: 12px; color: var(--muted); }
+  #log .st { font-size: 12px; white-space: nowrap; }
+  .st.saved { color: var(--yes); } .st.saving, .st.retrying { color: var(--warn); } .st.failed { color: var(--no); }
+  details summary { font-weight: 600; cursor: pointer; }
+  .hint { font-size: 13px; color: var(--muted); }
+  input[type=range] { width: 100%; }
+
+  @media (orientation: landscape) and (min-width: 700px) {
+    .main { display: grid; grid-template-columns: 1.3fr 1fr; gap: 12px; align-items: start; }
+    .stage { max-height: 70vh; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <span class="bin" id="binNow">No bin yet</span>
+    <span class="spacer"></span>
+    <span class="pill"><span class="dot" id="connDot"></span><span id="connText">Not connected</span></span>
+  </div>
+
+  <div class="main">
+    <div>
+      <div class="stage" id="stage">
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="overlay"></canvas>
+        <div class="placeholder" id="placeholder">Set up Settings below, then tap Start.</div>
+      </div>
+      <button id="startBtn">Start</button>
+    </div>
+
+    <div>
+      <div id="banner"><span class="icon"></span><div><span id="bannerMain">Not started</span><span id="bannerSub">Fill in Settings first.</span></div></div>
+      <div class="bigbtns">
+        <button id="yesBtn" disabled>Yes</button>
+        <button id="noBtn" disabled>No</button>
+        <button id="againBtn" disabled>Again</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="small" id="pauseBtn" disabled>Pause</button>
+        <button class="small" id="skipBtn" disabled>Skip item</button>
+        <button class="small" id="recalBtn" disabled>Recalibrate</button>
+      </div>
+
+      <div class="card">
+        <div class="stats">
+          <div><b id="statItems">0</b>this session</div>
+          <div><b id="statBin">0</b>in this bin</div>
+          <div><b id="statCost">$0.00</b>AI cost</div>
+        </div>
+        <div class="row" style="margin-top:10px; flex-wrap:nowrap">
+          <input type="text" id="binManual" placeholder="Type a bin number" inputmode="text">
+          <button class="small" id="binSetBtn">Set bin</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <h2 style="margin:0">Recent items</h2>
+          <button class="small" id="undoBtn" disabled>Delete last</button>
+        </div>
+        <ul id="log"></ul>
+      </div>
+
+      <div class="card">
+        <details id="settingsBox">
+          <summary>Settings</summary>
+          <label>Apps Script web app URL
+            <input type="url" id="setUrl" placeholder="https://script.google.com/macros/s/.../exec" autocapitalize="off" autocorrect="off">
+          </label>
+          <label>Passcode
+            <input type="password" id="setPass" autocapitalize="off" autocorrect="off">
+          </label>
+          <label>Camera
+            <select id="setFacing">
+              <option value="user">Front camera (screen faces you)</option>
+              <option value="environment">Back camera (sharper, screen faces away)</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="setPhotos"> Save a photo of each item to Drive</label>
+          <label>Detection sensitivity: <span id="sensVal"></span>
+            <input type="range" id="setSens" min="2" max="20" step="1">
+          </label>
+          <div class="hint">Lower reacts to smaller items but triggers more easily on shadows.</div>
+          <label>Hold-still time: <span id="stillVal"></span>
+            <input type="range" id="setStill" min="500" max="2500" step="100">
+          </label>
+          <div class="row" style="margin-top:12px">
+            <button class="small" id="testBtn">Test connection</button>
+            <span class="hint" id="testResult"></span>
+          </div>
+          <p class="hint">Voice commands: <b>yes</b> · <b>no, [name]</b> · <b>again</b> (retake the photo) · <b>skip</b> (don't log it).</p>
+        </details>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // ---------- settings ----------
+  const defaults = { url: '', passcode: '', savePhotos: true, facing: 'user', sensitivity: 6, stillMs: 1000 };
+  const settings = Object.assign({}, defaults);
+  try { Object.assign(settings, JSON.parse(localStorage.getItem('binScannerPhone') || '{}')); } catch (e) {}
+  const persist = () => { try { localStorage.setItem('binScannerPhone', JSON.stringify(settings)); } catch (e) {} };
+
+  function bindSettings() {
+    $('setUrl').value = settings.url;
+    $('setPass').value = settings.passcode;
+    $('setPhotos').checked = settings.savePhotos;
+    $('setFacing').value = settings.facing;
+    $('setSens').value = settings.sensitivity;
+    $('setStill').value = settings.stillMs;
+    const show = () => {
+      $('sensVal').textContent = settings.sensitivity + '% of frame';
+      $('stillVal').textContent = (settings.stillMs / 1000).toFixed(1) + ' s';
+      $('stage').classList.toggle('mirror', settings.facing === 'user');
+    };
+    show();
+    $('setUrl').onchange = e => { settings.url = e.target.value.trim(); persist(); checkConnection(); };
+    $('setPass').onchange = e => { settings.passcode = e.target.value; persist(); checkConnection(); };
+    $('setPhotos').onchange = e => { settings.savePhotos = e.target.checked; persist(); };
+    $('setFacing').onchange = e => { settings.facing = e.target.value; persist(); show(); if (stream) startCamera().catch(cameraError); };
+    $('setSens').oninput = e => { settings.sensitivity = +e.target.value; persist(); show(); };
+    $('setStill').oninput = e => { settings.stillMs = +e.target.value; persist(); show(); };
+    $('testBtn').onclick = checkConnection;
+    if (!settings.url || !settings.passcode) $('settingsBox').open = true;
+  }
+
+  // ---------- backend ----------
+  async function api(action, data) {
+    if (!settings.url) throw new Error('Add the Apps Script URL in Settings.');
+    const res = await fetch(settings.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ action, passcode: settings.passcode }, data || {}))
+    });
+    const txt = await res.text();
+    try { return JSON.parse(txt); }
+    catch (e) { throw new Error('Unexpected reply from Apps Script. Check the URL ends in /exec and access is "Anyone".'); }
+  }
+  async function checkConnection() {
+    $('testResult').textContent = 'Checking...';
+    try {
+      const r = await api('ping');
+      if (!r.ok) throw new Error(r.error);
+      if (!r.hasKey) throw new Error('Connected, but ANTHROPIC_API_KEY is missing in Script Properties.');
+      if (r.version !== 2) throw new Error('Connected, but the Apps Script is the old version. Paste the new Code.gs and deploy a new version.');
+      setConn(true, 'Connected');
+      $('testResult').textContent = 'Connected (' + r.model + ').';
+      return true;
+    } catch (err) {
+      setConn(false, 'Not connected');
+      $('testResult').textContent = err.message;
+      return false;
+    }
+  }
+  function setConn(ok, text) { $('connDot').className = 'dot ' + (ok ? 'ok' : 'bad'); $('connText').textContent = text; }
+
+  // ---------- speech ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let activeRec = null, voice = null;
+
+  function pickVoice() {
+    if (!('speechSynthesis' in window)) return;
+    const vs = speechSynthesis.getVoices().filter(v => /^en(-|_)US/i.test(v.lang));
+    voice = vs.find(v => /samantha|enhanced|premium/i.test(v.name)) || vs[0] || null;
+  }
+  if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+
+  function speak(text) {
+    return new Promise(resolve => {
+      if (!('speechSynthesis' in window)) return resolve();
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.0; u.lang = 'en-US'; if (voice) u.voice = voice;
+      let done = false;
+      const fin = () => { if (!done) { done = true; resolve(); } };
+      u.onend = fin; u.onerror = fin;
+      setTimeout(fin, 2500 + text.length * 90);
+      speechSynthesis.speak(u);
+    });
+  }
+
+  function listen(ms) {
+    return new Promise(resolve => {
+      if (!SR) return resolve(null);
+      const r = new SR();
+      r.lang = 'en-US'; r.interimResults = false; r.maxAlternatives = 1; r.continuous = false;
+      let done = false;
+      const fin = v => {
+        if (done) return; done = true; clearTimeout(t);
+        if (activeRec === r) activeRec = null;
+        try { r.abort(); } catch (e) {}
+        resolve(v);
+      };
+      r.onresult = e => fin(e.results[0][0].transcript);
+      r.onerror = e => {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          micBlocked = true;
+          setBanner('Microphone or Siri is off', 'Use the buttons, or see the setup steps to turn on voice.', '');
+        }
+        fin(null);
+      };
+      r.onend = () => fin(null);
+      const t = setTimeout(() => fin(null), ms);
+      activeRec = r;
+      try { r.start(); } catch (e) { fin(null); }
+    });
+  }
+  let micBlocked = false;
+  function stopListening() { if (activeRec) { try { activeRec.abort(); } catch (e) {} activeRec = null; } }
+
+  // Waits for a spoken answer or a button press. Resolves text, {click:'yes'|'no'|'again'|'skip'}, or null (silence).
+  let clickResolver = null;
+  function setAnswerButtons(on) { ['yesBtn', 'noBtn', 'againBtn'].forEach(id => $(id).disabled = !on); }
+  function listenOrClick(ms) {
+    setAnswerButtons(true);
+    return new Promise(resolve => {
+      let done = false;
+      const fin = v => { if (done) return; done = true; clickResolver = null; stopListening(); resolve(v); };
+      clickResolver = fin;
+      if (micBlocked || !SR) setTimeout(() => fin(null), ms * 2.5); // buttons only: give more time
+      else listen(ms).then(v => fin(v));
+    }).finally(() => setAnswerButtons(false));
+  }
+  $('yesBtn').onclick = () => clickResolver && clickResolver({ click: 'yes' });
+  $('noBtn').onclick = () => clickResolver && clickResolver({ click: 'no' });
+  $('againBtn').onclick = () => clickResolver && clickResolver({ click: 'again' });
+  $('skipBtn').onclick = () => { if (clickResolver) clickResolver({ click: 'skip' }); };
+
+  function cleanName(s) {
+    return (s || '').toLowerCase()
+      .replace(/[.,!?]/g, ' ')
+      .replace(/^\s*(it's|it is|its|that's|that is|thats|this is|it was)\s+/, '')
+      .replace(/^\s*(a|an|the|some)\s+/, '')
+      .replace(/\s+/g, ' ').trim();
+  }
+  // Turns an answer into {type: yes|no|again|skip|name|unclear, name?}
+  function parseAnswer(ans) {
+    if (ans && ans.click) return { type: ans.click };
+    const t = (ans || '').toLowerCase().replace(/[.,!?]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!t) return { type: 'unclear' };
+    if (/^(yes|yeah|yep|yup|yah|ya|correct|right|sure|ok|okay|affirmative|that's right|thats right)\b/.test(t)) return { type: 'yes' };
+    if (/^(again|retake|redo|re do|try again|one more time|rescan|take it again)\b/.test(t)) return { type: 'again' };
+    if (/^(skip|cancel|ignore|never ?mind|forget it)\b/.test(t)) return { type: 'skip' };
+    const m = t.match(/^(no|nope|nah|know|wrong|incorrect|not)\b[\s,]*(.*)$/);
+    if (m) return { type: 'no', name: cleanName(m[2].replace(/^.*\b(it's|its|it is)\s+/, '')) }; // "no, not a hammer, it's a wrench" -> wrench
+    const n = cleanName(t);
+    if (n && n.split(' ').length <= 6) return { type: 'name', name: n };
+    return { type: 'unclear' };
+  }
+
+  // Ask for the item's name by voice; typed fallback if voice gets nothing.
+  async function askName(promptText) {
+    for (let i = 0; i < 2; i++) {
+      await speak(i === 0 ? (promptText || 'What is it?') : 'Sorry, what is it?');
+      await sleep(200);
+      setBanner('What is it?', 'Say the name. "Skip" to leave it out.', 'listening');
+      const ans = await listenOrClick(8000);
+      const p = parseAnswer(ans);
+      if (p.type === 'skip') return { skip: true };
+      if (p.type === 'again') return { again: true };
+      if (p.type === 'name') return { name: p.name };
+      if (p.type === 'no' && p.name) return { name: p.name };
+      if (ans && ans.click === 'no') break; // they're at the phone: let them type
+    }
+    const typed = window.prompt('What is it? (leave blank to save for review)');
+    return typed && cleanName(typed) ? { name: cleanName(typed) } : {};
+  }
+
+  // Returns {item, status} | {again:true} | {skip:true}
+  async function confirmFlow(ai) {
+    const name = ai.name;
+    if (!name) {
+      const r = await askName("I couldn't tell what that is. What is it?");
+      if (r.again || r.skip) return r;
+      if (r.name) { await speak('Noted: ' + r.name); return { item: r.name, status: 'Named by me' }; }
+      await speak('Saved for review.');
+      return { item: 'unknown item', status: 'Needs review' };
+    }
+
+    const lowConf = ai.confidence === 'low';
+    const question = lowConf ? 'Not sure. Maybe ' + name + '?' : 'Scanned: ' + name;
+    let silent = 0, unclear = 0;
+    while (silent < 2 && unclear < 2) {
+      await speak(silent || unclear ? question + '. Yes or no?' : question);
+      await sleep(200);
+      setBanner((lowConf ? 'Maybe: ' : 'Scanned: ') + name,
+        lowConf ? 'Say yes, no and the name, or just the name.' : 'Say "yes", or "no" and the right name.', 'listening');
+      const ans = await listenOrClick(7000);
+      if (ans === null) { silent++; continue; }
+      const p = parseAnswer(ans);
+      if (p.type === 'yes') { await speak('Noted.'); return { item: name, status: 'Confirmed' }; }
+      if (p.type === 'again' || p.type === 'skip') return { [p.type]: true };
+      if (p.type === 'no' || (p.type === 'name' && lowConf)) {
+        let fixed = p.name;
+        if (!fixed) {
+          const r = await askName(ai.alternatives && ai.alternatives.length ? 'Is it a ' + ai.alternatives[0] + '? Or what is it?' : 'What is it?');
+          if (r.again || r.skip) return r;
+          fixed = r.name;
+        }
+        if (fixed && /^(yes|yeah|yep)$/.test(fixed) && ai.alternatives && ai.alternatives[0]) fixed = ai.alternatives[0];
+        if (fixed) { await speak('Noted: ' + fixed); return { item: fixed, status: 'Corrected' }; }
+        await speak('Saved for review.');
+        return { item: name, status: 'Needs review' };
+      }
+      unclear++;
+      if (unclear < 2) await speak('Sorry. Say yes, or no and the name.');
+    }
+    await speak('Saved for review.');
+    return { item: name, status: 'Needs review' };
+  }
+
+  // ---------- UI state ----------
+  function setBanner(main, sub, mode) {
+    $('bannerMain').textContent = main;
+    $('bannerSub').textContent = sub || '';
+    $('banner').className = mode || '';
+  }
+  let currentBin = null, sessionItems = 0, binCounts = {}, costUSD = 0;
+  function setBin(bin) { currentBin = bin; $('binNow').textContent = 'Bin ' + bin; refreshStats(); }
+  function refreshStats() {
+    $('statItems').textContent = sessionItems;
+    $('statBin').textContent = currentBin ? (binCounts[currentBin] || 0) : 0;
+    $('statCost').textContent = '$' + costUSD.toFixed(2);
+  }
+  $('binSetBtn').onclick = () => {
+    const v = $('binManual').value.trim();
+    if (v) { setBin(v); $('binManual').value = ''; $('binManual').blur(); speak('Now filling bin ' + v); }
+  };
+
+  // ---------- saving ----------
+  const saveQueue = [], saved = [];
+  let saving = false, seq = 0;
+  function addLog(e) {
+    const li = document.createElement('li');
+    li.id = 'log-' + e.localId;
+    li.innerHTML = '<img alt=""><div><div class="name"></div><div class="meta"></div></div><span class="st saving">Saving</span>';
+    li.querySelector('img').src = 'data:image/jpeg;base64,' + e.thumb;
+    li.querySelector('.name').textContent = e.item;
+    li.querySelector('.meta').textContent = 'Bin ' + e.bin + ' · ' + e.status + (e.status !== 'Confirmed' && e.aiGuess ? ' (AI: ' + e.aiGuess + ')' : '');
+    $('log').prepend(li);
+  }
+  function setLogState(e, cls, text) {
+    const st = document.querySelector('#log-' + e.localId + ' .st');
+    if (st) { st.className = 'st ' + cls; st.textContent = text; }
+  }
+  function queueSave(e) { e.localId = ++seq; addLog(e); saveQueue.push(e); pump(); }
+  async function pump() {
+    if (saving) return;
+    saving = true;
+    while (saveQueue.length) {
+      const e = saveQueue[0];
+      try {
+        const r = await api('save', { bin: e.bin, item: e.item, status: e.status, aiGuess: e.aiGuess, photo: settings.savePhotos ? e.photo : '' });
+        if (!r.ok) throw new Error(r.error);
+        e.row = r.row; e.photoId = r.photoId; e.photo = null;
+        saved.push(e); setLogState(e, 'saved', 'Row ' + r.row);
+        saveQueue.shift(); $('undoBtn').disabled = false;
+      } catch (err) {
+        e.tries = (e.tries || 0) + 1;
+        if (e.tries >= 6) { setLogState(e, 'failed', 'Not saved'); console.error(err); saveQueue.shift(); }
+        else { setLogState(e, 'retrying', 'Retrying'); await sleep(3000); }
+      }
+    }
+    saving = false;
+  }
+  $('undoBtn').onclick = async () => {
+    const e = saved[saved.length - 1];
+    if (!e) return;
+    if (!confirm('Delete "' + e.item + '" (bin ' + e.bin + ') from the sheet?')) return;
+    $('undoBtn').disabled = true;
+    try {
+      const r = await api('deleteRow', { row: e.row, bin: e.bin, item: e.item, photoId: e.photoId });
+      if (!r.ok) throw new Error(r.error);
+      saved.pop();
+      document.getElementById('log-' + e.localId)?.remove();
+      sessionItems--; binCounts[e.bin]--; refreshStats();
+    } catch (err) { alert(err.message); }
+    $('undoBtn').disabled = saved.length === 0;
+  };
+
+  // ---------- camera + detection ----------
+  const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
+  const A = 160; let AW = 120, AH = 160;
+  const aCanvas = document.createElement('canvas');
+  const actx = aCanvas.getContext('2d', { willReadFrequently: true });
+  const full = document.createElement('canvas');
+  const fctx = full.getContext('2d', { willReadFrequently: true });
+
+  let stream = null, bg = null, prev = null, state = 'off', stillSince = 0, clearTicks = 0, loopTimer = null, wakeLock = null;
+  const PIXEL_DIFF = 28, MOTION_MAX = 3.5;
+
+  async function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw Object.assign(new Error('Camera not available here'), { name: 'NoMediaDevices' });
+    }
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    const c = { facingMode: { ideal: settings.facing }, width: { ideal: 1920 }, height: { ideal: 1080 } };
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: c, audio: false }); }
+    catch (err) {
+      if (err.name === 'OverconstrainedError' || err.name === 'NotReadableError') {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: settings.facing }, audio: false });
+      } else throw err;
+    }
+    video.srcObject = stream;
+    await video.play();
+    for (let i = 0; i < 50 && !video.videoWidth; i++) await sleep(100);
+    sizeCanvases();
+    $('placeholder').style.display = 'none';
+    $('stage').style.aspectRatio = video.videoWidth + ' / ' + video.videoHeight;
+    await keepAwake();
+    await calibrate();
+  }
+  function sizeCanvases() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (vw >= vh) { AW = A; AH = Math.round(A * vh / vw); } else { AH = A; AW = Math.round(A * vw / vh); }
+    aCanvas.width = AW; aCanvas.height = AH;
+    overlay.width = vw; overlay.height = vh;
+  }
+
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible' || !stream) return;
+    keepAwake();
+    const track = stream.getVideoTracks()[0];
+    if (!track || track.readyState === 'ended') {
+      try { await startCamera(); } catch (e) { cameraError(e); }
+    }
+  });
+
+  function grabSmall() {
+    actx.drawImage(video, 0, 0, AW, AH);
+    const d = actx.getImageData(0, 0, AW, AH).data;
+    const g = new Float32Array(AW * AH);
+    for (let i = 0, j = 0; i < g.length; i++, j += 4) g[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+    return g;
+  }
+
+  async function calibrate() {
+    state = 'calibrating';
+    setBanner('Calibrating...', 'Keep the area in front of the camera empty.', 'busy');
+    await speak('Calibrating. Keep the area in front of the camera empty.');
+    await sleep(600);
+    if (video.videoWidth && (overlay.width !== video.videoWidth || overlay.height !== video.videoHeight)) sizeCanvases();
+    const frames = [];
+    for (let i = 0; i < 8; i++) { frames.push(grabSmall()); await sleep(100); }
+    bg = new Float32Array(AW * AH);
+    for (const f of frames) for (let i = 0; i < bg.length; i++) bg[i] += f[i] / frames.length;
+    prev = null; state = 'waitItem';
+    ['pauseBtn', 'skipBtn', 'recalBtn'].forEach(id => $(id).disabled = false);
+    $('startBtn').style.display = 'none';
+    if (currentBin) { setBanner('Ready', 'Bin ' + currentBin + '. Hold up the next item.', 'ready'); await speak('Ready.'); }
+    else { setBanner('Show a bin QR code', 'Hold the bin label up to the camera.', 'ready'); await speak('Ready. Show a bin QR code to begin.'); }
+    if (!loopTimer) loopTimer = setInterval(tick, 120);
+  }
+
+  function tick() {
+    if (!bg || !['waitItem', 'settling', 'waitClear'].includes(state)) { if (state !== 'busy') drawBox(null); return; }
+    if (video.videoWidth && video.videoWidth !== overlay.width) { sizeCanvases(); bg = null; calibrate(); return; } // phone rotated
+    const f = grabSmall(), N = AW * AH;
+    const colCount = new Uint16Array(AW), rowCount = new Uint16Array(AH);
+    let changed = 0, motion = 0;
+    for (let y = 0, i = 0; y < AH; y++) {
+      for (let x = 0; x < AW; x++, i++) {
+        if (Math.abs(f[i] - bg[i]) > PIXEL_DIFF) { changed++; colCount[x]++; rowCount[y]++; }
+        if (prev) motion += Math.abs(f[i] - prev[i]);
+      }
+    }
+    motion = prev ? motion / N : 99;
+    prev = f;
+    const frac = changed / N * 100, thr = settings.sensitivity;
+    const box = frac >= thr ? boundsOf(colCount, rowCount) : null;
+    const now = performance.now();
+
+    if (state === 'waitClear') {
+      drawBox(box, '#98a2a8');
+      if (frac < thr * 0.4) {
+        if (++clearTicks >= 4) {
+          state = 'waitItem';
+          setBanner(currentBin ? 'Ready for the next item' : 'Show a bin QR code', currentBin ? 'Bin ' + currentBin : 'Hold the bin label up to the camera.', 'ready');
+        }
+      } else clearTicks = 0;
+      return;
+    }
+    if (frac >= thr && motion < MOTION_MAX) {
+      if (state !== 'settling') { state = 'settling'; stillSince = now; setBanner('Hold still...', '', 'busy'); }
+      drawBox(box, '#2f8f6f', Math.min(1, (now - stillSince) / settings.stillMs));
+      if (now - stillSince >= settings.stillMs) capture(box);
+    } else {
+      if (state === 'settling') setBanner(currentBin ? 'Ready for the next item' : 'Show a bin QR code', currentBin ? 'Bin ' + currentBin : '', 'ready');
+      state = 'waitItem';
+      drawBox(box, '#98a2a8');
+      if (frac < thr * 0.4 && motion < 2) for (let i = 0; i < N; i++) bg[i] = bg[i] * 0.95 + f[i] * 0.05;
+    }
+  }
+
+  function boundsOf(colCount, rowCount) {
+    const minPx = 2;
+    let x0 = 0, x1 = AW - 1, y0 = 0, y1 = AH - 1;
+    while (x0 < AW && colCount[x0] < minPx) x0++;
+    while (x1 > x0 && colCount[x1] < minPx) x1--;
+    while (y0 < AH && rowCount[y0] < minPx) y0++;
+    while (y1 > y0 && rowCount[y1] < minPx) y1--;
+    if (x0 >= x1 || y0 >= y1) return null;
+    return { x: x0 / AW, y: y0 / AH, w: (x1 - x0 + 1) / AW, h: (y1 - y0 + 1) / AH };
+  }
+  function drawBox(box, color, progress) {
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    if (!box) return;
+    const W = overlay.width, H = overlay.height;
+    octx.lineWidth = Math.max(4, W / 250);
+    octx.strokeStyle = color;
+    octx.strokeRect(box.x * W, box.y * H, box.w * W, box.h * H);
+    if (progress) { octx.fillStyle = color; octx.fillRect(box.x * W, box.y * H - octx.lineWidth * 2, box.w * W * progress, octx.lineWidth * 2); }
+  }
+
+  function grabFull() {
+    full.width = video.videoWidth; full.height = video.videoHeight;
+    fctx.drawImage(video, 0, 0);
+  }
+  function readQR() {
+    if (typeof jsQR !== 'function') return null;
+    const scale = Math.min(1, 1000 / Math.max(full.width, full.height));
+    const w = Math.round(full.width * scale), h = Math.round(full.height * scale);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const cx = c.getContext('2d', { willReadFrequently: true });
+    cx.drawImage(full, 0, 0, w, h);
+    const code = jsQR(cx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'attemptBoth' });
+    return code && code.data ? code.data.trim() : null;
+  }
+
+  // A generous crop around the item (keeps the whole object, trims empty backdrop), max 1024 px on the long side.
+  function cropJpeg(box) {
+    const W = full.width, H = full.height;
+    let x = 0, y = 0, w = W, h = H;
+    if (box) {
+      const pad = 0.35;
+      x = Math.max(0, (box.x - box.w * pad) * W);
+      y = Math.max(0, (box.y - box.h * pad) * H);
+      w = Math.min(W - x, box.w * (1 + 2 * pad) * W);
+      h = Math.min(H - y, box.h * (1 + 2 * pad) * H);
+      const minSide = Math.min(W, H) * 0.6;
+      if (w < minSide) { x = Math.max(0, Math.min(W - minSide, x - (minSide - w) / 2)); w = Math.min(W, minSide); }
+      if (h < minSide) { y = Math.max(0, Math.min(H - minSide, y - (minSide - h) / 2)); h = Math.min(H, minSide); }
+    }
+    const scale = Math.min(1, 1024 / Math.max(w, h));
+    const c = document.createElement('canvas');
+    c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+    const cx = c.getContext('2d');
+    cx.imageSmoothingQuality = 'high';
+    cx.drawImage(full, x, y, w, h, 0, 0, c.width, c.height);
+    const b64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
+    const t = document.createElement('canvas'); t.width = 96; t.height = 96;
+    const s = Math.max(96 / c.width, 96 / c.height);
+    t.getContext('2d').drawImage(c, (96 - c.width * s) / 2, (96 - c.height * s) / 2, c.width * s, c.height * s);
+    return { b64, thumb: t.toDataURL('image/jpeg', 0.7).split(',')[1] };
+  }
+
+  async function identify(box) {
+    grabFull();
+    const shot = cropJpeg(box);
+    setBanner('Identifying...', '', 'busy');
+    const r = await api('identify', { image: shot.b64 });
+    if (!r.ok) throw new Error(r.error);
+    costUSD += r.costUSD || 0; refreshStats();
+    setConn(true, 'Connected');
+    return { shot, ai: r };
+  }
+
+  async function capture(box) {
+    state = 'busy';
+    $('skipBtn').disabled = false;
+    grabFull();
+
+    let qr = readQR();
+    if (qr) qr = qr.replace(/^bin\s*[-#:]?\s*/i, '').trim() || qr;
+    if (qr) {
+      if (qr === currentBin) await speak('Still on bin ' + qr);
+      else { setBin(qr); setBanner('Bin ' + qr, 'Now filling this bin.', 'ready'); await speak('Now filling bin ' + qr); }
+      return toWaitClear();
+    }
+    if (!currentBin) {
+      setBanner('Show a bin QR code first', 'Or type a bin number below.', '');
+      await speak('Show a bin QR code first.');
+      return toWaitClear();
+    }
+
+    let result = null, shot = null, ai = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { ({ shot, ai } = await identify(box)); }
+      catch (err) {
+        setConn(false, 'Error');
+        setBanner('Could not identify', err.message, '');
+        await speak("Couldn't reach the server. Try that item again.");
+        return toWaitClear();
+      }
+      result = await confirmFlow(ai);
+      if (!result.again) break;
+      setBanner('Retaking...', 'Turn the item so the camera sees it clearly, and hold still.', 'busy');
+      await speak('OK. Turn it toward the camera and hold still.');
+      await sleep(1800);
+      box = null; // use a wider crop on the retake
+      result = null;
+    }
+    if (!result || result.again) { await speak('Saved for review.'); result = { item: (ai && ai.name) || 'unknown item', status: 'Needs review' }; }
+    if (result.skip) { await speak('Skipped.'); return toWaitClear(); }
+
+    const bin = currentBin;
+    sessionItems++; binCounts[bin] = (binCounts[bin] || 0) + 1; refreshStats();
+    const aiGuess = ai && ai.name ? ai.name + ' (' + ai.confidence + ')' : '';
+    queueSave({ bin, item: result.item, status: result.status, aiGuess, photo: shot.b64, thumb: shot.thumb });
+    toWaitClear();
+  }
+
+  function toWaitClear() {
+    clearTicks = 0; prev = null; state = 'waitClear';
+    setBanner('Put it in the bin', 'Clear the camera area for the next item.', '');
+  }
+
+  function cameraError(err) {
+    const tips = {
+      NotAllowedError: 'Camera blocked. iPhone Settings > Apps > Safari > Camera > Allow, then reload this page.',
+      NotReadableError: 'Another app is using the camera. Close it and tap Start again.',
+      NotFoundError: 'No camera found.',
+      NoMediaDevices: 'Open this page in Safari using the https:// GitHub Pages link.'
+    };
+    setBanner('Camera not available (' + err.name + ')', tips[err.name] || err.message, '');
+    $('startBtn').style.display = '';
+  }
+
+  $('startBtn').onclick = async () => {
+    // Speaking inside the tap unlocks audio on iPhone.
+    if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance('Starting'); if (voice) u.voice = voice; speechSynthesis.speak(u); }
+    if (!settings.url || !settings.passcode) { $('settingsBox').open = true; setBanner('Fill in Settings first', 'Apps Script URL and passcode.', ''); return; }
+    try { await startCamera(); } catch (err) { cameraError(err); }
+  };
+  $('pauseBtn').onclick = () => {
+    if (state === 'paused') { state = 'waitClear'; clearTicks = 0; $('pauseBtn').textContent = 'Pause'; setBanner('Resuming...', 'Clear the camera area.', 'busy'); }
+    else if (['waitItem', 'settling', 'waitClear'].includes(state)) { state = 'paused'; $('pauseBtn').textContent = 'Resume'; setBanner('Paused', 'Tap Resume to continue.', ''); }
+  };
+  $('recalBtn').onclick = () => { if (state !== 'busy' && state !== 'calibrating') calibrate(); };
+  window.addEventListener('beforeunload', e => { if (saveQueue.length) { e.preventDefault(); e.returnValue = ''; } });
+
+  bindSettings();
+  if (location.protocol === 'file:') setBanner('Open the GitHub Pages link', 'The camera only works on the https:// web address.', '');
+  else if (!SR) $('bannerSub').textContent = 'Voice answers are not available in this browser. The buttons still work.';
+  if (settings.url && settings.passcode) checkConnection();
+
+  // exposed for testing
+  window.__binScanner = { parseAnswer, cleanName };
+})();
+</script>
+</body>
+</html>
